@@ -1,0 +1,102 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: The name of the S3 bucket to create and upload the report to
+
+Resources:
+  ReportBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+    DeletionPolicy: Delete
+
+  OpenSCAPSSMDocument:
+    Type: "AWS::SSM::Document"
+    Properties:
+      DocumentType: "Command"
+      DocumentFormat: "JSON"
+      Name: "FedoraOpenSCAPSSMDocument"
+      Content: !Sub |
+        {
+          "schemaVersion": "2.2",
+          "description": "OpenSCAP scan and report upload to S3",
+          "parameters": {
+            "region": {
+              "type": "String",
+              "description": "The AWS region to use",
+              "default": "us-east-1"
+            },
+            "s3bucket": {
+              "type": "String",
+              "description": "The S3 bucket to upload the report to",
+              "default": "${BucketName}"
+            }
+          },
+          "mainSteps": [
+            {
+              "action": "aws:runShellScript",
+              "name": "mkdir_openSCAP",
+              "inputs": {
+                "runCommand": [
+                  "if [ ! -d openscap ]; then mkdir openscap; fi"
+                ]
+              }
+            },
+            {
+              "action": "aws:runShellScript",
+              "name": "Install_OpenSCAP",
+              "inputs": {
+                "runCommand": [
+                  "cd openscap && dnf install scap-security-guide"
+                ]
+              }
+            },
+            {
+              "action": "aws:runShellScript",
+              "name": "Install_scap_security_guide",
+              "inputs": {
+                "runCommand": [
+                  "yes | dnf install scap-security-guide"
+                ]
+              }
+            },
+            {
+              "action": "aws:runShellScript",
+              "name": "Fix_broken_link",
+              "inputs": {
+                "runCommand": [
+                  "sudo sed -i 's|https://www.redhat.com/security/data/oval/com.redhat.rhsa-RHEL7.xml.bz2|https://www.redhat.com/security/data/oval/v2/RHEL7/rhel-7.oval.xml.bz2|g' /usr/share/xml/scap/ssg/content/ssg-amzn2-ds.xml"
+                ]
+              }
+            },
+            {
+              "action": "aws:runShellScript",
+              "name": "Run_OpenSCAP_scan",
+              "inputs": {
+                "runCommand": [
+                  "oscap xccdf eval --profile xccdf_org.ssgproject.content_profile_stig-rhel7-disa --fetch-remote-resources --results-arf arf.xml --report report.html /usr/share/xml/scap/ssg/content/ssg-amzn2-ds.xml || true"
+                ]
+              }
+            },
+            {
+              "action": "aws:runShellScript",
+              "name": "Upload_report_to_S3",
+              "inputs": {
+                "runCommand": [
+                  "aws configure set region {{region}} && aws s3 cp report.html s3://{{s3bucket}}/$(hostname)-$(date +%Y_%m_%d_%H_%M_%S)/report.html"
+                ]
+              }
+            },
+            {
+              "action": "aws:runShellScript",
+              "name": "Clean_up",
+              "inputs": {
+                "runCommand": [
+                  "yes | sudo yum erase openscap-scanner"
+                ]
+              }
+            }
+          ]
+        }
