@@ -1,0 +1,327 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: Template for creating SCAP automation with Lambda, AWS Systems Manager Automation, s3 and DynamoDB.
+
+Parameters:
+  ReportS3BucketName:
+    Type: String
+    ConstraintDescription: Must follow AWS S3 Bucket naming rules 
+    Description: The name of the S3 Bucket to store your scanning results in.
+
+  EnableSecurityHubFindings:
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
+    Description: Choose true if you would like the findings to be pushed to Security Hub, Security Hub must be turned on if true is selected.
+
+Resources:
+  # Creates a Parameter in the Parameter store to allow turning on and off support for Security Hub
+  EnableSecurityHubFindingsParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/SCAPTesting/EnableSecurityHub'
+      Description: 'Detirmines if Security Hub is used by the ProcessSCAPScanResults Lambda Function'
+      Type: String
+      Value: !Ref EnableSecurityHubFindings
+
+  # Create the s3 Bucket to hold all the scan results.
+  SCAPScanResultsBucket:
+    DependsOn: 
+      - ProcessSCAPScanResults
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: Private
+      BucketName: !Ref ReportS3BucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: 
+              SSEAlgorithm: 'aws:kms'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: 's3:ObjectCreated:*'
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: .xml
+            Function: !GetAtt ProcessSCAPScanResults.Arn
+
+  # Bucket policy to only allow TLS connections.
+  SCAPScanResultsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties: 
+      Bucket: !Ref ReportS3BucketName
+      PolicyDocument: 
+        Statement:
+          - Action: 
+            - 's3:*'
+            Effect: Deny
+            Resource: 
+              - !Sub arn:aws:s3:::${ReportS3BucketName}
+              - !Sub arn:aws:s3:::${ReportS3BucketName}/*
+            Principal: '*'
+            Condition:
+              Bool:
+                'aws:SecureTransport': 'false'
+  
+  # DynamoDB table to hold the ignore list
+  # Note that backups are not enabled for this table, if you wish to enable backup you 
+  # can set PointInTimeRecoveryEnabled for the table
+  SCAPScanIgnoreList:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: SCAP_Scan_Ignore_List
+      SSESpecification:
+        SSEEnabled: 'true'      
+      BillingMode: PROVISIONED
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+      AttributeDefinitions:
+      - AttributeName: SCAP_Rule_Name
+        AttributeType: S
+      KeySchema:
+      - AttributeName: SCAP_Rule_Name
+        KeyType: HASH
+
+  # DynamoDB table to hold scan results
+  # Note that backups are not enabled for this table, if you wish to enable backup you 
+  # can set PointInTimeRecoveryEnabled for the table, also data from the S3 bucket can 
+  # be replayed to repopulate this table
+  SCAPScanResults:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: SCAP_Scan_Results
+      SSESpecification:
+        SSEEnabled: 'true'
+      BillingMode: PROVISIONED
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 2
+      AttributeDefinitions:
+      - AttributeName: InstanceId
+        AttributeType: S
+      - AttributeName: SCAP_Rule_Name
+        AttributeType: S
+      KeySchema:
+      - AttributeName: InstanceId
+        KeyType: HASH
+      - AttributeName: SCAP_Rule_Name
+        KeyType: RANGE
+  
+  # Permission for S3 to call the lambda function from the bucket created
+  S3InvokeLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ProcessSCAPScanResults
+      SourceAccount: !Sub ${AWS::AccountId}
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub arn:aws:s3:::${ReportS3BucketName}
+
+  # Role to be used by instances that are to have the SCAP scans run on them.
+  SCAPEC2InstanceRole:
+    Type: 'AWS::IAM::Role'
+    DependsOn: 
+      - SCAPScanIgnoreList
+      - SCAPScanResults
+    Properties:
+      RoleName: SCAPEC2InstanceRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+
+      # The managed policy to allow the EC2 access to SSM permissions
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM
+
+      # Policy to allow the EC2 to push files to the S3 bucket created. 
+      Policies:
+        - PolicyName: SCAPBucketAccessPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:PutObject'
+                Resource: !Sub 'arn:aws:s3:::${ReportS3BucketName}/*'
+  
+  # Instance Profile for the EC2 Role
+  SCAPEC2InstanceRoleProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      InstanceProfileName: SCAPEC2InstanceRole
+      Path: /
+      Roles:
+        - !Ref SCAPEC2InstanceRole
+
+
+  # Role for the Lambda function to allow access to the permissions needed
+  ProcessSCAPScanResultsRole:
+    Type: 'AWS::IAM::Role'
+    DependsOn: 
+      - SCAPScanIgnoreList
+      - SCAPScanResults
+    Properties:
+      RoleName: ProcessSCAPScanResultsRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+
+      Policies:
+        # Policy to allows pushing findings to Security Hub
+        - PolicyName: ProcessSCAPScanResultsSecurityHubPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'securityhub:BatchImportFindings'
+                Resource: !Sub 'arn:aws:securityhub:${AWS::Region}:${AWS::AccountId}:*'
+      
+        # Policy to allows the Lambda function to push logs to CloudWatch 
+        - PolicyName: ProcessSCAPScanResultsLogGroupPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/ProcessSCAPScanResults:*'
+        
+        # Policy that provides addess to the files in the S3 Bucket that was created      
+        - PolicyName: ProcessSCAPScanResultsS3AccessPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:Get*'
+                Resource: 
+                  - !Sub arn:aws:s3:::${ReportS3BucketName}
+                  - !Sub arn:aws:s3:::${ReportS3BucketName}/*
+
+        # Policy that provices access to push metrics to CloudWatch          
+        - PolicyName: ProcessSCAPScanResultsCloudWatchPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'cloudwatch:PutMetricData'
+                Resource: '*'
+
+        # Policy that allows access to read the data from the Ignore List DynamoDB Table
+        - PolicyName: ProcessSCAPScanResultsIgnoreListPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:Scan'
+                Resource:
+                  - !Sub 
+                    - arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${tableName}
+                    - {tableName: !Select [1, !Split ['/', !GetAtt SCAPScanIgnoreList.Arn]]} 
+
+        # Policy that allows write access to the results table in DynamoDB            
+        - PolicyName: ProcessSCAPScanResultsScanResultsPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:BatchWriteItem'
+                Resource:
+                  - !Sub 
+                    - arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${tableName}
+                    - {tableName: !Select [1, !Split ['/', !GetAtt SCAPScanResults.Arn]]} 
+
+        # Policy that access to the parameter creted above for turning on sending findings to Security Hub            
+        - PolicyName: ProcessSCAPScanResultsParameterStorePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ssm:GetParameters'
+                  - 'ssm:DescribeParameters'
+                  - 'ssm:GetParameter'
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/SCAPTesting/EnableSecurityHub'
+
+
+  # Lambda function that processes the SCAP scan results xml file
+  ProcessSCAPScanResults:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Description: "Processes the SCAP Scan results and pushes to DynamoDB and CloudWatch"
+      FunctionName: ProcessSCAPScanResults
+      Handler: ProcessSCAPScanResults.lambda_handler
+      Role: !GetAtt ProcessSCAPScanResultsRole.Arn
+      Timeout: 360
+      Runtime: python3.8
+      MemorySize: 1024
+      Code:
+        S3Bucket: awsiammedia
+        S3Key: public/sample/703_Automate_SCAP_testing/ProcessSCAPScanResults.py.zip
+
+  # Creates an Association that will run all the commands to execute the OpenSCAP tool and produce the findings      
+  SCAPRunCommandAssociation:
+    Type: AWS::SSM::Association
+    Properties:
+      AssociationName: SCAPRunCommandAssociation
+      ComplianceSeverity: MEDIUM
+      Name: AWS-RunShellScript
+      Parameters:
+        commands:
+          - yum install openscap-scanner scap-security-guide -y
+          - if grep -q -i "release 8" /etc/redhat-release ; then
+          -   scriptFile="/usr/share/xml/scap/ssg/content/ssg-rhel8-ds.xml"
+          - elif grep -q -i "release 7" /etc/redhat-release ; then
+          -   scriptFile="/usr/share/xml/scap/ssg/content/ssg-rhel7-ds.xml"
+          - elif grep -q -i "release 6" /etc/redhat-release ; then
+          -   scriptFile="/usr/share/xml/scap/ssg/content/ssg-rhel6-ds.xml"              
+          - else
+          -   echo "Running neither RHEL6.x, RHEL7.x or RHEL 8.x !"
+          - fi
+          - if [ "$scriptFile" ] ; then
+          - sed -i 's/multi-check="true"/multi-check="false"/g' $scriptFile
+          -   oscap xccdf eval --fetch-remote-resources --profile xccdf_org.ssgproject.content_profile_stig --results-arf arf.xml --report report.html $scriptFile
+          - fi
+          - 'instanceId=$(curl http://169.254.169.254/latest/meta-data/instance-id)'
+          - timestamp=$(date +%s)
+          - !Sub '/usr/local/bin/aws s3 cp arf.xml s3://${SCAPScanResultsBucket}/$instanceId/$timestamp-scap-results.xml'
+          - !Sub '/usr/local/bin/aws s3 cp report.html s3://${SCAPScanResultsBucket}/$instanceId/$timestamp-scap-results.html'
+      ScheduleExpression: cron(0 0 12 1/1 * ? *)
+      Targets:
+      - Key: tag:RunSCAP
+        Values:
+          - 'True'
+          - 'true'
+      WaitForSuccessTimeoutSeconds: 300 
