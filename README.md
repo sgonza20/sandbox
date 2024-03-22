@@ -11,7 +11,6 @@ This repository contains a collection of small projects and examples designed to
 - [Getting Started](#getting-started)
 - [Projects](#projects)
 - [Contributing](#contributing)
-- [License](#license)
 
 ## Getting Started
 
