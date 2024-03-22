@@ -21,7 +21,7 @@ To get started with the projects in this repository, follow these steps:
 
 ## Projects
 
-### 1. [OpenSCAP_SecurityHub](project-directory-link)
+### 1. [OpenSCAP_SecurityHub](https://github.com/sgonza20/sandbox/tree/main/aws/openscap_securityhub)
 
 Description: Executes OpenSCAP compliance scans on EC2 instances and sends the results to Security Hub.
 
