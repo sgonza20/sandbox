@@ -27,7 +27,7 @@ Description: Executes OpenSCAP compliance scans on EC2 instances and sends the r
 
 Technologies Used: SSM, S3, EC2, Lambda, OpenSCAP, Security Hub
 
-Instructions: tbd
+Instructions: Deploy the create-scap-automation.yml CloudFormation template to create the necessary IAM roles, Lambda function, S3 bucket and trigger. Edit the Lambda function code to point to your SCAP profile and Security Hub configuration. Test by launching an EC2 instance and verifying results in Security Hub. 
 
 ...
 
