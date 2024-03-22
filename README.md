@@ -4,7 +4,7 @@ This repository is dedicated to hosting various AWS sandbox projects, allowing y
 
 ## About
 
-This repository contains a collection of small projects and examples designed to help you get hands-on experience with AWS services.
+Im the best COD player.
 
 ## Table of Contents
 
