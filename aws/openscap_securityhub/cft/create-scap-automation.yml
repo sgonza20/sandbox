@@ -288,7 +288,7 @@ Resources:
       Runtime: python3.8
       MemorySize: 1024
       Code:
-        S3Bucket: jonproject2024
+        S3Bucket: securityhublambdafunction2024
         S3Key: lambda.py.zip
 
   # Creates an Association that will run all the commands to execute the OpenSCAP tool and produce the findings      
