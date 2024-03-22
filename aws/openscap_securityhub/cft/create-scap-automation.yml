@@ -288,8 +288,8 @@ Resources:
       Runtime: python3.8
       MemorySize: 1024
       Code:
-        S3Bucket: awsiammedia
-        S3Key: public/sample/703_Automate_SCAP_testing/ProcessSCAPScanResults.py.zip
+        S3Bucket: jonproject2024
+        S3Key: lambda.py.zip
 
   # Creates an Association that will run all the commands to execute the OpenSCAP tool and produce the findings      
   SCAPRunCommandAssociation:
