@@ -1,8 +1,9 @@
 import json
 import boto3
 import datetime
+import requests
 from datetime import date
-import xml.etree.ElementTree as ET 
+import xml.etree.ElementTree as ET
 
 s3 = boto3.client('s3')
 cloudWatch = boto3.client('cloudwatch')
@@ -25,6 +26,8 @@ def lambda_handler(event, context):
     # get the object
     obj = s3.get_object(Bucket=bucket_name, Key=file_key)
     
+    r = requests.get('https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/U_RHEL_9_V1R2_STIG.zip')
+
     # Get parameter for using Security Hub
     useSecurityHub = ssmClient.get_parameter(Name='/SCAPTesting/EnableSecurityHub')['Parameter']['Value']
     
