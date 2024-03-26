@@ -1,7 +1,6 @@
 import json
 import boto3
 import datetime
-import requests
 from datetime import date
 import xml.etree.ElementTree as ET
 
@@ -26,7 +25,7 @@ def lambda_handler(event, context):
     # get the object
     obj = s3.get_object(Bucket=bucket_name, Key=file_key)
     
-    r = requests.get('https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/U_RHEL_9_V1R2_STIG.zip')
+    # r = requests.get('https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/U_RHEL_9_V1R2_STIG.zip')
 
     # Get parameter for using Security Hub
     useSecurityHub = ssmClient.get_parameter(Name='/SCAPTesting/EnableSecurityHub')['Parameter']['Value']
@@ -65,11 +64,11 @@ def lambda_handler(event, context):
         if testId not in ignoreList:
             if(item.findtext('{http://checklists.nist.gov/xccdf/1.2}result') == "fail"):
                 saveToDynamoDB(dynamoDbItems, instanceId, item, bucket_name, file_key)
-                if useSecurityHub == "yes" and item.attrib.get("severity") in ["high","medium","low"]:
+                if useSecurityHub == "true" and item.attrib.get("severity") in ["high","medium","low"]:
                     try:
                         pushToSecurityHub(securityHubFindings,root, instanceId, item, region, aws_account_id, testVersion, bucket_name, file_key)
                     except Exception as e:
-                        useSecurityHub = "no"
+                        useSecurityHub = "false"
                         print("SecurityHub is not enabled b: " + str(e))
                 if(item.attrib.get("severity") == "high"):
                     high+=1
@@ -94,7 +93,7 @@ def lambda_handler(event, context):
             )
     
     # if Security Hub is enabled, send the results in batches of 100
-    if useSecurityHub == "yes":
+    if useSecurityHub == "true":
         myfindings = securityHubFindings
         try:
             findingsLeft = True
@@ -199,7 +198,7 @@ def pushToSecurityHub(securityHubFindings, root, instanceId, item, region, aws_a
                     }
                 },
                 'ProductFields': {
-                    "ProviderName": profile.findtext('{http://checklists.nist.gov/xccdf/1.2}title'),
+                    "ProviderName": rule.findtext('{http://checklists.nist.gov/xccdf/1.2}title'),
                     "ProviderVersion": testVersion
                 },
                 'Resources': [
