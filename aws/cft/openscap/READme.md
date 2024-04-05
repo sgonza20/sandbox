@@ -1,1 +1,1 @@
-![OpenSCAP Diagram](OpenSCAP.drawio.png)
+![OpenSCAP Diagram](images/OpenSCAPDiagram.drawio.png)
