@@ -1,1 +1,1 @@
-![OpenSCAP Diagram](sgonza20/sandbox/aws/cft/openscap/OpenSCAP.drawio)
+![OpenSCAP Diagram](OpenSCAP.drawio.png)
