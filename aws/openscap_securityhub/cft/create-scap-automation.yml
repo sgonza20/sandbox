@@ -282,7 +282,7 @@ Resources:
     Properties:
       Description: "Processes the SCAP Scan results and pushes to DynamoDB and CloudWatch"
       FunctionName: ProcessSCAPScanResults
-      Handler: lambda.lambda_handler
+      Handler: lambda.lambda_handler 
       Role: !GetAtt ProcessSCAPScanResultsRole.Arn
       Timeout: 360
       Runtime: python3.8
@@ -328,4 +328,4 @@ Resources:
         Values:
           - 'True'
           - 'true'
-      WaitForSuccessTimeoutSeconds: 300 
+      # WaitForSuccessTimeoutSeconds: 300 
